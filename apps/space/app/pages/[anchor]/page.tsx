@@ -5,8 +5,8 @@
  */
 
 import { useMemo } from "react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
+import { Link } from "react-router";
 import useSWR from "swr";
 // plane imports
 import { API_BASE_URL } from "@plane/constants";
@@ -57,7 +57,7 @@ const PublicPageTreeNode = (props: {
   const children = childrenMap.get(node.id) ?? [];
   return (
     <>
-      <Link href={`/pages/${anchor}/${node.id}`}>
+      <Link to={`/pages/${anchor}/${node.id}`}>
         <div
           className={cn(
             "flex items-center gap-1.5 rounded-md py-1.5 pr-2 text-13",
@@ -138,7 +138,7 @@ const PublicPageView = () => {
   return (
     <div className="flex h-screen w-full overflow-hidden">
       <aside className="hidden h-full w-72 flex-shrink-0 flex-col overflow-y-auto border-r border-subtle bg-surface-1 px-3 py-4 md:flex">
-        <Link href={`/pages/${anchor}`}>
+        <Link to={`/pages/${anchor}`}>
           <div className="mb-3 flex items-center gap-2 px-2 text-14 font-semibold">
             <PageEmoji logoProps={rootNode.logo_props} />
             <span className="truncate">{rootNode.name || "Untitled"}</span>
