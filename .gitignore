@@ -117,3 +117,6 @@ packages/i18n/src/types/keys.generated.ts
 
 # Local security notes (not for version control)
 /security/
+
+# Private runbooks — live host/key/config values (same convention as Harness)
+docs/private/

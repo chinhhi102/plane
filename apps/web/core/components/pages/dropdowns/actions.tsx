@@ -39,7 +39,10 @@ export type TPageActions =
   | "delete"
   | "version-history"
   | "export"
-  | "move";
+  | "move"
+  | "publish"
+  | "copy-public-link"
+  | "unpublish";
 
 type Props = {
   extraOptions?: (TContextMenuItem & { key: TPageActions })[];
@@ -53,7 +56,7 @@ export const PageActions = observer(function PageActions(props: Props) {
   const { extraOptions, optionsOrder, page, parentRef, storeType } = props;
   // states
   const [deletePageModal, setDeletePageModal] = useState(false);
-  const [movePageModal, setMovePageModal] = useState(false);
+  const [_movePageModal, setMovePageModal] = useState(false);
   // params
   const { workspaceSlug } = useParams();
   // page flag

@@ -4,17 +4,28 @@
  * See the LICENSE file for details.
  */
 
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { observer } from "mobx-react";
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
 import { EUserPermissionsLevel, EUserPermissions } from "@plane/constants";
 import { useTranslation } from "@plane/i18n";
-import { CycleIcon, IntakeIcon, ModuleIcon, PageIcon, ViewsIcon, WorkItemsIcon } from "@plane/propel/icons";
+import {
+  ChevronRightIcon,
+  CycleIcon,
+  IntakeIcon,
+  ModuleIcon,
+  PageIcon,
+  ViewsIcon,
+  WorkItemsIcon,
+} from "@plane/propel/icons";
 import type { EUserProjectRoles } from "@plane/types";
+import { orderBy } from "lodash-es";
+import { cn } from "@plane/utils";
 // plane ui
 // components
 import { SidebarNavItem } from "@/components/sidebar/sidebar-navigation";
+import { SidebarPagesTree } from "@/components/workspace/sidebar/pages-tree";
 // hooks
 import { useAppTheme } from "@/hooks/store/use-app-theme";
 import { useIssueDetail } from "@/hooks/store/use-issue-detail";
@@ -41,6 +52,8 @@ type TProjectItemsProps = {
 export const ProjectNavigation = observer(function ProjectNavigation(props: TProjectItemsProps) {
   const { workspaceSlug, projectId, additionalNavigationItems } = props;
   const { workItem: workItemIdentifierFromRoute } = useParams();
+  // states
+  const [manualPagesTreeOpen, setManualPagesTreeOpen] = useState<boolean | null>(null);
   // store hooks
   const { t } = useTranslation();
   const { isExtendedProjectSidebarOpened, toggleExtendedProjectSidebar, toggleSidebar } = useAppTheme();
@@ -57,6 +70,8 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
     : undefined;
   const workItem = workItemId ? getIssueById(workItemId) : undefined;
   const project = getPartialProjectById(projectId);
+  // the pages tree opens automatically while browsing this project's pages; a manual toggle wins
+  const isPagesTreeOpen = manualPagesTreeOpen ?? pathname.includes(`/projects/${projectId}/pages`);
   // handlers
   const handleProjectClick = () => {
     if (window.innerWidth < 768) {
@@ -69,12 +84,12 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
   };
 
   const baseNavigation = useCallback(
-    (workspaceSlug: string, projectId: string): TNavigationItem[] => [
+    (wsSlug: string, prjId: string): TNavigationItem[] => [
       {
         i18n_key: "sidebar.work_items",
         key: "work_items",
         name: "Work items",
-        href: `/${workspaceSlug}/projects/${projectId}/issues`,
+        href: `/${wsSlug}/projects/${prjId}/issues`,
         icon: WorkItemsIcon,
         access: [EUserPermissions.ADMIN, EUserPermissions.MEMBER, EUserPermissions.GUEST],
         shouldRender: true,
@@ -84,7 +99,7 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
         i18n_key: "sidebar.cycles",
         key: "cycles",
         name: "Cycles",
-        href: `/${workspaceSlug}/projects/${projectId}/cycles`,
+        href: `/${wsSlug}/projects/${prjId}/cycles`,
         icon: CycleIcon,
         access: [EUserPermissions.ADMIN, EUserPermissions.MEMBER],
         shouldRender: project?.cycle_view ?? false,
@@ -94,7 +109,7 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
         i18n_key: "sidebar.modules",
         key: "modules",
         name: "Modules",
-        href: `/${workspaceSlug}/projects/${projectId}/modules`,
+        href: `/${wsSlug}/projects/${prjId}/modules`,
         icon: ModuleIcon,
         access: [EUserPermissions.ADMIN, EUserPermissions.MEMBER],
         shouldRender: project?.module_view ?? false,
@@ -104,7 +119,7 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
         i18n_key: "sidebar.views",
         key: "views",
         name: "Views",
-        href: `/${workspaceSlug}/projects/${projectId}/views`,
+        href: `/${wsSlug}/projects/${prjId}/views`,
         icon: ViewsIcon,
         access: [EUserPermissions.ADMIN, EUserPermissions.MEMBER, EUserPermissions.GUEST],
         shouldRender: project?.issue_views_view ?? false,
@@ -114,7 +129,7 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
         i18n_key: "sidebar.pages",
         key: "pages",
         name: "Pages",
-        href: `/${workspaceSlug}/projects/${projectId}/pages`,
+        href: `/${wsSlug}/projects/${prjId}/pages`,
         icon: PageIcon,
         access: [EUserPermissions.ADMIN, EUserPermissions.MEMBER, EUserPermissions.GUEST],
         shouldRender: project?.page_view ?? false,
@@ -124,7 +139,7 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
         i18n_key: "sidebar.intake",
         key: "intake",
         name: "Intake",
-        href: `/${workspaceSlug}/projects/${projectId}/intake`,
+        href: `/${wsSlug}/projects/${prjId}/intake`,
         icon: IntakeIcon,
         access: [EUserPermissions.ADMIN, EUserPermissions.MEMBER, EUserPermissions.GUEST],
         shouldRender: project?.inbox_view ?? false,
@@ -136,20 +151,18 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
 
   // memoized navigation items and adding additional navigation items
   const navigationItemsMemo = useMemo(() => {
-    const navigationItems = (workspaceSlug: string, projectId: string): TNavigationItem[] => {
-      const navItems = baseNavigation(workspaceSlug, projectId);
+    const navigationItems = (wsSlug: string, prjId: string): TNavigationItem[] => {
+      const navItems = baseNavigation(wsSlug, prjId);
 
       if (additionalNavigationItems) {
-        navItems.push(...additionalNavigationItems(workspaceSlug, projectId));
+        navItems.push(...additionalNavigationItems(wsSlug, prjId));
       }
 
       return navItems;
     };
 
     // sort navigation items by sortOrder
-    const sortedNavigationItems = navigationItems(workspaceSlug, projectId).sort(
-      (a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)
-    );
+    const sortedNavigationItems = orderBy(navigationItems(workspaceSlug, projectId), [(item) => item.sortOrder || 0]);
 
     return sortedNavigationItems;
   }, [workspaceSlug, projectId, baseNavigation, additionalNavigationItems]);
@@ -182,21 +195,47 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
         if (!hasAccess) return null;
 
         const shouldShowCount = item.key === "intake" && (project.intake_count ?? 0) > 0;
+        const isPagesItem = item.key === "pages";
 
         return (
-          <Link key={item.key} href={item.href} onClick={handleProjectClick}>
-            <SidebarNavItem isActive={!!isActive(item)}>
-              <div className="flex w-full items-center justify-between gap-1.5 py-[1px]">
-                <div className="flex items-center gap-1.5">
-                  <item.icon
-                    className={`size-4 flex-shrink-0 ${item.name === "Intake" ? "stroke-1" : "stroke-[1.5]"}`}
-                  />
-                  <span className="text-11 font-medium">{t(item.i18n_key)}</span>
+          <React.Fragment key={item.key}>
+            <Link href={item.href} onClick={handleProjectClick}>
+              <SidebarNavItem isActive={!!isActive(item)}>
+                <div className="flex w-full items-center justify-between gap-1.5 py-[1px]">
+                  <div className="flex items-center gap-1.5">
+                    <item.icon
+                      className={`size-4 flex-shrink-0 ${item.name === "Intake" ? "stroke-1" : "stroke-[1.5]"}`}
+                    />
+                    <span className="text-11 font-medium">{t(item.i18n_key)}</span>
+                  </div>
+                  {shouldShowCount && <span className="text-11 font-medium text-tertiary">{project.intake_count}</span>}
+                  {isPagesItem && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setManualPagesTreeOpen(!isPagesTreeOpen);
+                      }}
+                      className="grid size-4 flex-shrink-0 place-items-center rounded hover:bg-layer-transparent-hover"
+                      aria-label={isPagesTreeOpen ? "Collapse pages tree" : "Expand pages tree"}
+                    >
+                      <ChevronRightIcon
+                        className={cn("size-3 text-tertiary transition-transform", isPagesTreeOpen && "rotate-90")}
+                      />
+                    </button>
+                  )}
                 </div>
-                {shouldShowCount && <span className="text-11 font-medium text-tertiary">{project.intake_count}</span>}
-              </div>
-            </SidebarNavItem>
-          </Link>
+              </SidebarNavItem>
+            </Link>
+            {isPagesItem && isPagesTreeOpen && (
+              <SidebarPagesTree
+                workspaceSlug={workspaceSlug}
+                projectId={projectId}
+                handleNavigate={handleProjectClick}
+              />
+            )}
+          </React.Fragment>
         );
       })}
     </>

@@ -31,3 +31,9 @@ from .label import ProjectLabelsEndpoint
 from .asset import EntityAssetEndpoint, AssetRestoreEndpoint, EntityBulkAssetEndpoint
 
 from .meta import ProjectMetaDataEndpoint
+
+from .page import (
+    PagePublicDetailEndpoint,
+    PagePublicMetaEndpoint,
+    PagePublicTreeEndpoint,
+)

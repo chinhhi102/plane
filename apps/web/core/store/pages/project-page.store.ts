@@ -4,7 +4,7 @@
  * See the LICENSE file for details.
  */
 
-import { unset, set } from "lodash-es";
+import { orderBy, unset, set } from "lodash-es";
 import { makeObservable, observable, runInAction, action, reaction, computed } from "mobx";
 import { computedFn } from "mobx-utils";
 // types
@@ -46,6 +46,8 @@ export interface IProjectPageStore {
   getCurrentProjectPageIdsByTab: (pageType: TPageNavigationTabs) => string[] | undefined;
   getCurrentProjectPageIds: (projectId: string) => string[];
   getCurrentProjectFilteredPageIdsByTab: (pageType: TPageNavigationTabs) => string[] | undefined;
+  getChildPageIds: (pageId: string) => string[];
+  getRootPageIds: (projectId: string) => string[];
   getPageById: (pageId: string) => TProjectPage | undefined;
   updateFilters: <T extends keyof TPageFilters>(filterKey: T, filterValue: TPageFilters[T]) => void;
   clearAllFilters: () => void;
@@ -61,9 +63,16 @@ export interface IProjectPageStore {
     pageId: string,
     options?: { trackVisit?: boolean }
   ) => Promise<TPage | undefined>;
+  fetchSubPages: (workspaceSlug: string, projectId: string, pageId: string) => Promise<TPage[] | undefined>;
   createPage: (pageData: Partial<TPage>) => Promise<TPage | undefined>;
   removePage: (params: { pageId: string; shouldSync?: boolean }) => Promise<void>;
   movePage: (workspaceSlug: string, projectId: string, pageId: string, newProjectId: string) => Promise<void>;
+  movePageInHierarchy: (
+    workspaceSlug: string,
+    projectId: string,
+    pageId: string,
+    data: { parent: string | null; sort_order: number }
+  ) => Promise<void>;
 }
 
 export class ProjectPageStore implements IProjectPageStore {
@@ -96,9 +105,11 @@ export class ProjectPageStore implements IProjectPageStore {
       // actions
       fetchPagesList: action,
       fetchPageDetails: action,
+      fetchSubPages: action,
       createPage: action,
       removePage: action,
       movePage: action,
+      movePageInHierarchy: action,
     });
     this.rootStore = store;
     // service
@@ -142,7 +153,8 @@ export class ProjectPageStore implements IProjectPageStore {
     if (!projectId) return undefined;
     // helps to filter pages based on the pageType
     let pagesByType = filterPagesByPageType(pageType, Object.values(this?.data || {}));
-    pagesByType = pagesByType.filter((p) => p.project_ids?.includes(projectId));
+    // only root pages are shown in the list; child pages are reachable from their parent
+    pagesByType = pagesByType.filter((p) => p.project_ids?.includes(projectId) && !p.parent);
 
     const pages = (pagesByType.map((page) => page.id) as string[]) || undefined;
 
@@ -172,6 +184,7 @@ export class ProjectPageStore implements IProjectPageStore {
     let filteredPages = pagesByType.filter(
       (p) =>
         p.project_ids?.includes(projectId) &&
+        !p.parent &&
         getPageName(p.name).toLowerCase().includes(this.filters.searchQuery.toLowerCase()) &&
         shouldFilterPage(p, this.filters.filters)
     );
@@ -180,6 +193,30 @@ export class ProjectPageStore implements IProjectPageStore {
     const pages = (filteredPages.map((page) => page.id) as string[]) || undefined;
 
     return pages ?? undefined;
+  });
+
+  /**
+   * @description get the child page ids of a page, ordered by sort_order
+   * @param {string} pageId
+   */
+  getChildPageIds = computedFn((pageId: string) => {
+    const children = Object.values(this?.data || {}).filter(
+      (page) => page.parent === pageId && !page.deleted_at && !page.archived_at
+    );
+    const sortedChildren = orderBy(children, [(page) => page.sort_order ?? 0]);
+    return sortedChildren.map((page) => page.id) as string[];
+  });
+
+  /**
+   * @description get the root page ids of a project, ordered by sort_order then name
+   * @param {string} projectId
+   */
+  getRootPageIds = computedFn((projectId: string) => {
+    const roots = Object.values(this?.data || {}).filter(
+      (page) => page.project_ids?.includes(projectId) && !page.parent && !page.deleted_at && !page.archived_at
+    );
+    const sortedRoots = orderBy(roots, [(page) => page.sort_order ?? 0, (page) => getPageName(page.name)]);
+    return sortedRoots.map((page) => page.id) as string[];
   });
 
   /**
@@ -291,6 +328,41 @@ export class ProjectPageStore implements IProjectPageStore {
   };
 
   /**
+   * @description fetch the sub-pages of a page
+   * @param {string} pageId
+   */
+  fetchSubPages = async (workspaceSlug: string, projectId: string, pageId: string) => {
+    try {
+      if (!workspaceSlug || !projectId || !pageId) return undefined;
+
+      const pages = await this.service.fetchSubPages(workspaceSlug, projectId, pageId);
+      runInAction(() => {
+        for (const page of pages) {
+          if (page?.id) {
+            const existingPage = this.getPageById(page.id);
+            if (existingPage) {
+              const { name: _name, ...otherFields } = page;
+              existingPage.mutateProperties(otherFields, false);
+            } else {
+              set(this.data, [page.id], new ProjectPage(this.store, page));
+            }
+          }
+        }
+      });
+
+      return pages;
+    } catch (error) {
+      runInAction(() => {
+        this.error = {
+          title: "Failed",
+          description: "Failed to fetch the sub-pages, Please try again later.",
+        };
+      });
+      throw error;
+    }
+  };
+
+  /**
    * @description create a page
    * @param {Partial<TPage>} pageData
    */
@@ -364,6 +436,48 @@ export class ProjectPageStore implements IProjectPageStore {
       });
     } catch (error) {
       console.error("Unable to move page", error);
+      throw error;
+    }
+  };
+
+  /**
+   * @description move a page inside the project's page hierarchy (re-parent and/or reorder)
+   */
+  movePageInHierarchy = async (
+    workspaceSlug: string,
+    projectId: string,
+    pageId: string,
+    data: { parent: string | null; sort_order: number }
+  ) => {
+    const pageInstance = this.getPageById(pageId);
+    if (!pageInstance) return;
+    const previous = { parent: pageInstance.parent ?? null, sort_order: pageInstance.sort_order };
+    const adjustSubPagesCount = (parentId: string | null | undefined, delta: number) => {
+      const parentInstance = parentId ? this.getPageById(parentId) : undefined;
+      if (!parentInstance) return;
+      parentInstance.mutateProperties(
+        { sub_pages_count: Math.max(0, (parentInstance.sub_pages_count ?? 0) + delta) },
+        false
+      );
+    };
+    // optimistic update
+    runInAction(() => {
+      pageInstance.mutateProperties({ parent: data.parent, sort_order: data.sort_order }, false);
+      if (previous.parent !== data.parent) {
+        adjustSubPagesCount(previous.parent, -1);
+        adjustSubPagesCount(data.parent, 1);
+      }
+    });
+    try {
+      await this.service.update(workspaceSlug, projectId, pageId, data);
+    } catch (error) {
+      runInAction(() => {
+        pageInstance.mutateProperties(previous, false);
+        if (previous.parent !== data.parent) {
+          adjustSubPagesCount(previous.parent, 1);
+          adjustSubPagesCount(data.parent, -1);
+        }
+      });
       throw error;
     }
   };
