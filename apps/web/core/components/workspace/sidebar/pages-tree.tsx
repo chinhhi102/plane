@@ -37,13 +37,14 @@ type TPagesTreeItemProps = {
   projectId: string;
   parentId: string | null;
   isLastChild: boolean;
+  activeAncestorIds: string[];
   handleNavigate?: () => void;
 };
 
 const PagesTreeItem = observer(function PagesTreeItem(props: TPagesTreeItemProps) {
-  const { pageId, depth, workspaceSlug, projectId, parentId, isLastChild, handleNavigate } = props;
+  const { pageId, depth, workspaceSlug, projectId, parentId, isLastChild, activeAncestorIds, handleNavigate } = props;
   // states
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
   const [hasFetchedChildren, setHasFetchedChildren] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [instruction, setInstruction] = useState<InstructionType | undefined>(undefined);
@@ -59,6 +60,17 @@ const PagesTreeItem = observer(function PagesTreeItem(props: TPagesTreeItemProps
   const page = getPageById(pageId);
   const childPageIds = getChildPageIds(pageId);
   const isActive = pageIdFromRoute?.toString() === pageId;
+  // auto-expand ancestors of the active page; a manual toggle always wins
+  const isExpanded = manualExpanded ?? activeAncestorIds.includes(pageId);
+
+  // make sure children are loaded whenever the node is expanded (incl. auto-expansion)
+  useEffect(() => {
+    if (isExpanded && !hasFetchedChildren) {
+      setHasFetchedChildren(true);
+      fetchSubPages(workspaceSlug, projectId, pageId).catch(() => setHasFetchedChildren(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpanded, hasFetchedChildren, pageId]);
 
   // returns true if `candidateId` is `ancestorId` or one of its descendants
   const isInSubtreeOf = (candidateId: string, ancestorId: string) => {
@@ -166,12 +178,7 @@ const PagesTreeItem = observer(function PagesTreeItem(props: TPagesTreeItemProps
   const handleToggleExpand = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const nextExpanded = !isExpanded;
-    setIsExpanded(nextExpanded);
-    if (nextExpanded && !hasFetchedChildren) {
-      setHasFetchedChildren(true);
-      fetchSubPages(workspaceSlug, projectId, pageId).catch(() => setHasFetchedChildren(false));
-    }
+    setManualExpanded(!isExpanded);
   };
 
   return (
@@ -223,6 +230,7 @@ const PagesTreeItem = observer(function PagesTreeItem(props: TPagesTreeItemProps
             projectId={projectId}
             parentId={pageId}
             isLastChild={index === childPageIds.length - 1}
+            activeAncestorIds={activeAncestorIds}
             handleNavigate={handleNavigate}
           />
         ))}
@@ -238,13 +246,45 @@ type TSidebarPagesTreeProps = {
 
 export const SidebarPagesTree = observer(function SidebarPagesTree(props: TSidebarPagesTreeProps) {
   const { workspaceSlug, projectId, handleNavigate } = props;
+  // router
+  const { pageId: activePageIdParam } = useParams();
   // store hooks
-  const { fetchPagesList, getRootPageIds } = usePageStore(EPageStoreType.PROJECT);
+  const { fetchPagesList, fetchPageDetails, getRootPageIds, getPageById } = usePageStore(EPageStoreType.PROJECT);
   // fetch the project's root pages
   useSWR(
     workspaceSlug && projectId ? `SIDEBAR_PAGES_TREE_${projectId}` : null,
     workspaceSlug && projectId ? () => fetchPagesList(workspaceSlug, projectId) : null,
     { revalidateIfStale: false }
+  );
+
+  // walk up from the active page collecting its ancestors so they auto-expand;
+  // stop at the first ancestor that is not in the store yet and fetch it
+  const activePageId = activePageIdParam?.toString();
+  const activePage = activePageId ? getPageById(activePageId) : undefined;
+  const isActivePageInProject = !!activePage?.project_ids?.includes(projectId);
+  const activeAncestorIds: string[] = [];
+  let missingAncestorId: string | undefined;
+  if (isActivePageInProject) {
+    let currentId = activePage?.parent ?? undefined;
+    let guard = 0;
+    while (currentId && guard < 100) {
+      activeAncestorIds.push(currentId);
+      const currentPage = getPageById(currentId);
+      if (!currentPage) {
+        missingAncestorId = currentId;
+        break;
+      }
+      currentId = currentPage.parent ?? undefined;
+      guard += 1;
+    }
+  }
+  // load the missing ancestor; the walk above re-runs reactively as it arrives
+  useSWR(
+    missingAncestorId ? `SIDEBAR_PAGES_TREE_ANCESTOR_${missingAncestorId}` : null,
+    missingAncestorId
+      ? () => fetchPageDetails(workspaceSlug, projectId, missingAncestorId, { trackVisit: false })
+      : null,
+    { revalidateIfStale: false, revalidateOnFocus: false }
   );
 
   const rootPageIds = getRootPageIds(projectId);
@@ -262,6 +302,7 @@ export const SidebarPagesTree = observer(function SidebarPagesTree(props: TSideb
           projectId={projectId}
           parentId={null}
           isLastChild={index === rootPageIds.length - 1}
+          activeAncestorIds={activeAncestorIds}
           handleNavigate={handleNavigate}
         />
       ))}

@@ -53,7 +53,7 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
   const { workspaceSlug, projectId, additionalNavigationItems } = props;
   const { workItem: workItemIdentifierFromRoute } = useParams();
   // states
-  const [isPagesTreeOpen, setIsPagesTreeOpen] = useState(false);
+  const [manualPagesTreeOpen, setManualPagesTreeOpen] = useState<boolean | null>(null);
   // store hooks
   const { t } = useTranslation();
   const { isExtendedProjectSidebarOpened, toggleExtendedProjectSidebar, toggleSidebar } = useAppTheme();
@@ -70,6 +70,8 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
     : undefined;
   const workItem = workItemId ? getIssueById(workItemId) : undefined;
   const project = getPartialProjectById(projectId);
+  // the pages tree opens automatically while browsing this project's pages; a manual toggle wins
+  const isPagesTreeOpen = manualPagesTreeOpen ?? pathname.includes(`/projects/${projectId}/pages`);
   // handlers
   const handleProjectClick = () => {
     if (window.innerWidth < 768) {
@@ -213,7 +215,7 @@ export const ProjectNavigation = observer(function ProjectNavigation(props: TPro
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        setIsPagesTreeOpen((prev) => !prev);
+                        setManualPagesTreeOpen(!isPagesTreeOpen);
                       }}
                       className="grid size-4 flex-shrink-0 place-items-center rounded hover:bg-layer-transparent-hover"
                       aria-label={isPagesTreeOpen ? "Collapse pages tree" : "Expand pages tree"}
