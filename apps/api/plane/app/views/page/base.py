@@ -170,6 +170,16 @@ class PageViewSet(BaseViewSet):
                     projects__id=project_id,
                     project_pages__deleted_at__isnull=True,
                 )
+                # prevent cycles: the new parent cannot be the page itself
+                # or any page inside its own subtree
+                ancestor_id = parent
+                while ancestor_id:
+                    if str(ancestor_id) == str(page_id):
+                        return Response(
+                            {"error": "A page cannot be moved inside itself or its own sub-pages"},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    ancestor_id = Page.objects.filter(pk=ancestor_id).values_list("parent_id", flat=True).first()
 
             # Only update access if the page owner is the requesting  user
             if page.access != request.data.get("access", page.access) and page.owned_by_id != request.user.id:

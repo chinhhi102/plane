@@ -82,3 +82,136 @@ class TestPageNesting:
         assert response.status_code == 200
         names = [page["name"] for page in response.data]
         assert names == ["First", "Second"]
+
+    @pytest.mark.django_db
+    def test_move_page_updates_parent_and_sort_order(self, api_client, create_user, project_with_member):
+        workspace, project = project_with_member
+        root_a = _create_page(workspace, project, create_user, "Root A")
+        root_b = _create_page(workspace, project, create_user, "Root B")
+        child = _create_page(workspace, project, create_user, "Child", parent=root_a)
+
+        api_client.force_authenticate(user=create_user)
+        response = api_client.patch(
+            f"/api/workspaces/{workspace.slug}/projects/{project.id}/pages/{child.id}/",
+            {"parent": str(root_b.id), "sort_order": 5000},
+            format="json",
+        )
+
+        assert response.status_code == 200
+        child.refresh_from_db()
+        assert child.parent_id == root_b.id
+        assert child.sort_order == 5000
+
+    @pytest.mark.django_db
+    def test_move_page_rejects_cycle(self, api_client, create_user, project_with_member):
+        workspace, project = project_with_member
+        root = _create_page(workspace, project, create_user, "Root")
+        child = _create_page(workspace, project, create_user, "Child", parent=root)
+        grandchild = _create_page(workspace, project, create_user, "Grandchild", parent=child)
+
+        api_client.force_authenticate(user=create_user)
+        # moving the root under its own grandchild must be rejected
+        response = api_client.patch(
+            f"/api/workspaces/{workspace.slug}/projects/{project.id}/pages/{root.id}/",
+            {"parent": str(grandchild.id)},
+            format="json",
+        )
+        assert response.status_code == 400
+        root.refresh_from_db()
+        assert root.parent_id is None
+
+        # moving a page under itself must be rejected
+        response = api_client.patch(
+            f"/api/workspaces/{workspace.slug}/projects/{project.id}/pages/{child.id}/",
+            {"parent": str(child.id)},
+            format="json",
+        )
+        assert response.status_code == 400
+
+
+@pytest.mark.unit
+class TestPageExternalAPI:
+    """The public /api/v1 pages surface, authenticated with an API key."""
+
+    def _headers(self, api_token):
+        return {"HTTP_X_API_KEY": api_token.token}
+
+    @pytest.mark.django_db
+    def test_v1_list_returns_roots_without_body(self, api_client, create_user, api_token, project_with_member):
+        workspace, project = project_with_member
+        root = _create_page(workspace, project, create_user, "Root")
+        _create_page(workspace, project, create_user, "Child", parent=root)
+
+        response = api_client.get(
+            f"/api/v1/workspaces/{workspace.slug}/projects/{project.id}/pages/", **self._headers(api_token)
+        )
+        assert response.status_code == 200
+        assert [p["name"] for p in response.data] == ["Root"]
+        assert "description_html" not in response.data[0]
+
+    @pytest.mark.django_db
+    def test_v1_detail_and_sub_pages(self, api_client, create_user, api_token, project_with_member):
+        workspace, project = project_with_member
+        root = _create_page(workspace, project, create_user, "Root")
+        child = _create_page(workspace, project, create_user, "Child", parent=root, sort_order=10000)
+        child.description_html = "<h1>Child</h1>"
+        child.save()
+
+        response = api_client.get(
+            f"/api/v1/workspaces/{workspace.slug}/projects/{project.id}/pages/{child.id}/",
+            **self._headers(api_token),
+        )
+        assert response.status_code == 200
+        assert response.data["description_html"] == "<h1>Child</h1>"
+
+        response = api_client.get(
+            f"/api/v1/workspaces/{workspace.slug}/projects/{project.id}/pages/{root.id}/sub-pages/",
+            **self._headers(api_token),
+        )
+        assert response.status_code == 200
+        assert [p["name"] for p in response.data] == ["Child"]
+
+    @pytest.mark.django_db
+    def test_v1_create_child_page(self, api_client, create_user, api_token, project_with_member):
+        workspace, project = project_with_member
+        root = _create_page(workspace, project, create_user, "Root")
+
+        response = api_client.post(
+            f"/api/v1/workspaces/{workspace.slug}/projects/{project.id}/pages/",
+            {"name": "Bot page", "description_html": "<h1>Bot page</h1>", "parent": str(root.id)},
+            format="json",
+            **self._headers(api_token),
+        )
+        assert response.status_code == 201
+        page = Page.objects.get(pk=response.data["id"])
+        assert page.parent_id == root.id
+        assert ProjectPage.objects.filter(page=page, project=project).exists()
+
+    @pytest.mark.django_db
+    def test_v1_update_body_clears_binary_and_rejects_cycle(
+        self, api_client, create_user, api_token, project_with_member
+    ):
+        workspace, project = project_with_member
+        root = _create_page(workspace, project, create_user, "Root")
+        child = _create_page(workspace, project, create_user, "Child", parent=root)
+        child.description_binary = b"stale-binary"
+        child.save()
+
+        response = api_client.patch(
+            f"/api/v1/workspaces/{workspace.slug}/projects/{project.id}/pages/{child.id}/",
+            {"description_html": "<h1>Updated</h1>"},
+            format="json",
+            **self._headers(api_token),
+        )
+        assert response.status_code == 200
+        child.refresh_from_db()
+        assert child.description_html == "<h1>Updated</h1>"
+        assert child.description_binary is None
+
+        response = api_client.patch(
+            f"/api/v1/workspaces/{workspace.slug}/projects/{project.id}/pages/{root.id}/",
+            {"parent": str(child.id)},
+            format="json",
+            **self._headers(api_token),
+        )
+        assert response.status_code == 400

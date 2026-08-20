@@ -67,6 +67,12 @@ export interface IProjectPageStore {
   createPage: (pageData: Partial<TPage>) => Promise<TPage | undefined>;
   removePage: (params: { pageId: string; shouldSync?: boolean }) => Promise<void>;
   movePage: (workspaceSlug: string, projectId: string, pageId: string, newProjectId: string) => Promise<void>;
+  movePageInHierarchy: (
+    workspaceSlug: string,
+    projectId: string,
+    pageId: string,
+    data: { parent: string | null; sort_order: number }
+  ) => Promise<void>;
 }
 
 export class ProjectPageStore implements IProjectPageStore {
@@ -103,6 +109,7 @@ export class ProjectPageStore implements IProjectPageStore {
       createPage: action,
       removePage: action,
       movePage: action,
+      movePageInHierarchy: action,
     });
     this.rootStore = store;
     // service
@@ -429,6 +436,32 @@ export class ProjectPageStore implements IProjectPageStore {
       });
     } catch (error) {
       console.error("Unable to move page", error);
+      throw error;
+    }
+  };
+
+  /**
+   * @description move a page inside the project's page hierarchy (re-parent and/or reorder)
+   */
+  movePageInHierarchy = async (
+    workspaceSlug: string,
+    projectId: string,
+    pageId: string,
+    data: { parent: string | null; sort_order: number }
+  ) => {
+    const pageInstance = this.getPageById(pageId);
+    if (!pageInstance) return;
+    const previous = { parent: pageInstance.parent ?? null, sort_order: pageInstance.sort_order };
+    // optimistic update
+    runInAction(() => {
+      pageInstance.mutateProperties({ parent: data.parent, sort_order: data.sort_order }, false);
+    });
+    try {
+      await this.service.update(workspaceSlug, projectId, pageId, data);
+    } catch (error) {
+      runInAction(() => {
+        pageInstance.mutateProperties(previous, false);
+      });
       throw error;
     }
   };
