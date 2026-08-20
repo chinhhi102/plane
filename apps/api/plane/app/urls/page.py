@@ -35,6 +35,12 @@ urlpatterns = [
         PageViewSet.as_view({"get": "sub_pages"}),
         name="project-page-sub-pages",
     ),
+    # publish to web
+    path(
+        "workspaces/<str:slug>/projects/<uuid:project_id>/pages/<uuid:page_id>/publish/",
+        PageViewSet.as_view({"get": "publish_status", "post": "publish", "delete": "unpublish"}),
+        name="project-page-publish",
+    ),
     # favorite pages
     path(
         "workspaces/<str:slug>/projects/<uuid:project_id>/favorite-pages/<uuid:page_id>/",

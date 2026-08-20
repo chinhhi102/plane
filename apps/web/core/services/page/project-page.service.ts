@@ -29,6 +29,34 @@ export class ProjectPageService extends APIService {
       });
   }
 
+  async getPagePublishStatus(
+    workspaceSlug: string,
+    projectId: string,
+    pageId: string
+  ): Promise<{ anchor: string | null }> {
+    return this.get(`/api/workspaces/${workspaceSlug}/projects/${projectId}/pages/${pageId}/publish/`)
+      .then((response) => response?.data)
+      .catch((error) => {
+        throw error?.response?.data;
+      });
+  }
+
+  async publishPage(workspaceSlug: string, projectId: string, pageId: string): Promise<{ anchor: string }> {
+    return this.post(`/api/workspaces/${workspaceSlug}/projects/${projectId}/pages/${pageId}/publish/`)
+      .then((response) => response?.data)
+      .catch((error) => {
+        throw error?.response?.data;
+      });
+  }
+
+  async unpublishPage(workspaceSlug: string, projectId: string, pageId: string): Promise<void> {
+    return this.delete(`/api/workspaces/${workspaceSlug}/projects/${projectId}/pages/${pageId}/publish/`)
+      .then((response) => response?.data)
+      .catch((error) => {
+        throw error?.response?.data;
+      });
+  }
+
   async fetchSubPages(workspaceSlug: string, projectId: string, pageId: string): Promise<TPage[]> {
     return this.get(`/api/workspaces/${workspaceSlug}/projects/${projectId}/pages/${pageId}/sub-pages/`)
       .then((response) => response?.data)

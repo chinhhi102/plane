@@ -37,6 +37,7 @@ from plane.app.serializers import (
     PageBinaryUpdateSerializer,
 )
 from plane.db.models import (
+    DeployBoard,
     Page,
     PageLog,
     UserFavorite,
@@ -314,6 +315,33 @@ class PageViewSet(BaseViewSet):
             queryset = queryset.filter(owned_by=request.user)
         pages = PageSerializer(queryset, many=True).data
         return Response(pages, status=status.HTTP_200_OK)
+
+    def publish_status(self, request, slug, project_id, page_id):
+        page = self.get_queryset().filter(pk=page_id).first()
+        if not page:
+            return Response({"error": "Page not found"}, status=status.HTTP_404_NOT_FOUND)
+        board = DeployBoard.objects.filter(entity_name="page", entity_identifier=page_id).first()
+        return Response({"anchor": board.anchor if board else None}, status=status.HTTP_200_OK)
+
+    def publish(self, request, slug, project_id, page_id):
+        page = self.get_queryset().filter(pk=page_id).first()
+        if not page:
+            return Response({"error": "Page not found"}, status=status.HTTP_404_NOT_FOUND)
+        board, _ = DeployBoard.objects.get_or_create(
+            entity_name="page",
+            entity_identifier=page_id,
+            defaults={
+                "workspace_id": page.workspace_id,
+                "project_id": project_id,
+            },
+        )
+        return Response({"anchor": board.anchor}, status=status.HTTP_200_OK)
+
+    def unpublish(self, request, slug, project_id, page_id):
+        board = DeployBoard.objects.filter(entity_name="page", entity_identifier=page_id).first()
+        if board:
+            board.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def sub_pages(self, request, slug, project_id, page_id):
         queryset = self.get_queryset().filter(parent_id=page_id).order_by("sort_order", "-created_at")

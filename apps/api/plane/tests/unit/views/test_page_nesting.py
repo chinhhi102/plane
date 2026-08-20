@@ -215,3 +215,59 @@ class TestPageExternalAPI:
             **self._headers(api_token),
         )
         assert response.status_code == 400
+
+
+@pytest.mark.unit
+class TestPagePublish:
+    """Publishing a page to the web and the anonymous public endpoints."""
+
+    @pytest.mark.django_db
+    def test_publish_and_public_access(self, api_client, create_user, project_with_member):
+        workspace, project = project_with_member
+        root = _create_page(workspace, project, create_user, "Handbook")
+        child = _create_page(workspace, project, create_user, "Chapter", parent=root, sort_order=10000)
+        child.description_html = "<h1>Chapter</h1>"
+        child.save()
+        outside = _create_page(workspace, project, create_user, "Unrelated")
+
+        base = f"/api/workspaces/{workspace.slug}/projects/{project.id}/pages/{root.id}/publish/"
+        api_client.force_authenticate(user=create_user)
+        response = api_client.get(base)
+        assert response.status_code == 200
+        assert response.data["anchor"] is None
+
+        response = api_client.post(base)
+        assert response.status_code == 200
+        anchor = response.data["anchor"]
+        assert anchor
+
+        # anonymous access from a fresh client
+        api_client.force_authenticate(user=None)
+        response = api_client.get(f"/api/public/anchor/{anchor}/pages/meta/")
+        assert response.status_code == 200
+        assert response.data["name"] == "Handbook"
+
+        response = api_client.get(f"/api/public/anchor/{anchor}/pages/tree/")
+        assert response.status_code == 200
+        assert sorted(p["name"] for p in response.data) == ["Chapter", "Handbook"]
+
+        response = api_client.get(f"/api/public/anchor/{anchor}/pages/{child.id}/")
+        assert response.status_code == 200
+        assert response.data["description_html"] == "<h1>Chapter</h1>"
+
+        # a page outside the published subtree stays hidden
+        response = api_client.get(f"/api/public/anchor/{anchor}/pages/{outside.id}/")
+        assert response.status_code == 404
+
+    @pytest.mark.django_db
+    def test_unpublish_revokes_public_access(self, api_client, create_user, project_with_member):
+        workspace, project = project_with_member
+        root = _create_page(workspace, project, create_user, "Handbook")
+
+        base = f"/api/workspaces/{workspace.slug}/projects/{project.id}/pages/{root.id}/publish/"
+        api_client.force_authenticate(user=create_user)
+        anchor = api_client.post(base).data["anchor"]
+        assert api_client.delete(base).status_code == 204
+
+        api_client.force_authenticate(user=None)
+        assert api_client.get(f"/api/public/anchor/{anchor}/pages/meta/").status_code == 404
