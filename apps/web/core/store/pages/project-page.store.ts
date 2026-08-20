@@ -4,7 +4,7 @@
  * See the LICENSE file for details.
  */
 
-import { unset, set } from "lodash-es";
+import { orderBy, unset, set } from "lodash-es";
 import { makeObservable, observable, runInAction, action, reaction, computed } from "mobx";
 import { computedFn } from "mobx-utils";
 // types
@@ -47,6 +47,7 @@ export interface IProjectPageStore {
   getCurrentProjectPageIds: (projectId: string) => string[];
   getCurrentProjectFilteredPageIdsByTab: (pageType: TPageNavigationTabs) => string[] | undefined;
   getChildPageIds: (pageId: string) => string[];
+  getRootPageIds: (projectId: string) => string[];
   getPageById: (pageId: string) => TProjectPage | undefined;
   updateFilters: <T extends keyof TPageFilters>(filterKey: T, filterValue: TPageFilters[T]) => void;
   clearAllFilters: () => void;
@@ -195,8 +196,20 @@ export class ProjectPageStore implements IProjectPageStore {
     const children = Object.values(this?.data || {}).filter(
       (page) => page.parent === pageId && !page.deleted_at && !page.archived_at
     );
-    children.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-    return children.map((page) => page.id) as string[];
+    const sortedChildren = orderBy(children, [(page) => page.sort_order ?? 0]);
+    return sortedChildren.map((page) => page.id) as string[];
+  });
+
+  /**
+   * @description get the root page ids of a project, ordered by sort_order then name
+   * @param {string} projectId
+   */
+  getRootPageIds = computedFn((projectId: string) => {
+    const roots = Object.values(this?.data || {}).filter(
+      (page) => page.project_ids?.includes(projectId) && !page.parent && !page.deleted_at && !page.archived_at
+    );
+    const sortedRoots = orderBy(roots, [(page) => page.sort_order ?? 0, (page) => getPageName(page.name)]);
+    return sortedRoots.map((page) => page.id) as string[];
   });
 
   /**
