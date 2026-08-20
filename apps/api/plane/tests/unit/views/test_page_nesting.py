@@ -52,6 +52,7 @@ class TestPageNesting:
         assert response.status_code == 200
         names = [page["name"] for page in response.data]
         assert names == ["Root"]
+        assert response.data[0]["sub_pages_count"] == 1
 
     @pytest.mark.django_db
     def test_child_page_is_retrievable(self, api_client, create_user, project_with_member):
@@ -82,6 +83,8 @@ class TestPageNesting:
         assert response.status_code == 200
         names = [page["name"] for page in response.data]
         assert names == ["First", "Second"]
+        counts = {page["name"]: page["sub_pages_count"] for page in response.data}
+        assert counts == {"First": 1, "Second": 0}
 
     @pytest.mark.django_db
     def test_move_page_updates_parent_and_sort_order(self, api_client, create_user, project_with_member):

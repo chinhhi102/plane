@@ -25,6 +25,7 @@ export type TPage = {
   parent?: string | null | undefined;
   project_ids?: string[] | undefined;
   sort_order?: number | undefined;
+  sub_pages_count?: number | undefined;
   updated_at: Date | undefined;
   updated_by: string | undefined;
   workspace: string | undefined;

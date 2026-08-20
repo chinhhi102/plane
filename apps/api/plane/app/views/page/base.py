@@ -100,6 +100,13 @@ class PageViewSet(BaseViewSet):
             .select_related("workspace")
             .select_related("owned_by")
             .annotate(is_favorite=Exists(subquery))
+            .annotate(
+                sub_pages_count=Count(
+                    "child_page",
+                    filter=Q(child_page__deleted_at__isnull=True, child_page__archived_at__isnull=True),
+                    distinct=True,
+                )
+            )
             .order_by(self.request.GET.get("order_by", "-created_at"))
             .prefetch_related("labels")
             .order_by("-is_favorite", "-created_at")

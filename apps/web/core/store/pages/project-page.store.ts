@@ -452,15 +452,31 @@ export class ProjectPageStore implements IProjectPageStore {
     const pageInstance = this.getPageById(pageId);
     if (!pageInstance) return;
     const previous = { parent: pageInstance.parent ?? null, sort_order: pageInstance.sort_order };
+    const adjustSubPagesCount = (parentId: string | null | undefined, delta: number) => {
+      const parentInstance = parentId ? this.getPageById(parentId) : undefined;
+      if (!parentInstance) return;
+      parentInstance.mutateProperties(
+        { sub_pages_count: Math.max(0, (parentInstance.sub_pages_count ?? 0) + delta) },
+        false
+      );
+    };
     // optimistic update
     runInAction(() => {
       pageInstance.mutateProperties({ parent: data.parent, sort_order: data.sort_order }, false);
+      if (previous.parent !== data.parent) {
+        adjustSubPagesCount(previous.parent, -1);
+        adjustSubPagesCount(data.parent, 1);
+      }
     });
     try {
       await this.service.update(workspaceSlug, projectId, pageId, data);
     } catch (error) {
       runInAction(() => {
         pageInstance.mutateProperties(previous, false);
+        if (previous.parent !== data.parent) {
+          adjustSubPagesCount(previous.parent, 1);
+          adjustSubPagesCount(data.parent, -1);
+        }
       });
       throw error;
     }

@@ -60,8 +60,10 @@ const PagesTreeItem = observer(function PagesTreeItem(props: TPagesTreeItemProps
   const page = getPageById(pageId);
   const childPageIds = getChildPageIds(pageId);
   const isActive = pageIdFromRoute?.toString() === pageId;
+  // pages without sub-pages get no expand chevron
+  const hasSubPages = (page?.sub_pages_count ?? 0) > 0 || childPageIds.length > 0;
   // auto-expand ancestors of the active page; a manual toggle always wins
-  const isExpanded = manualExpanded ?? activeAncestorIds.includes(pageId);
+  const isExpanded = hasSubPages && (manualExpanded ?? activeAncestorIds.includes(pageId));
 
   // make sure children are loaded whenever the node is expanded (incl. auto-expansion)
   useEffect(() => {
@@ -198,16 +200,20 @@ const PagesTreeItem = observer(function PagesTreeItem(props: TPagesTreeItemProps
             )}
             style={{ paddingLeft: `${depth * 12 + 8}px` }}
           >
-            <button
-              type="button"
-              onClick={handleToggleExpand}
-              className="grid size-4 flex-shrink-0 place-items-center rounded hover:bg-layer-transparent-hover"
-              aria-label={isExpanded ? "Collapse sub-pages" : "Expand sub-pages"}
-            >
-              <ChevronRightIcon
-                className={cn("size-3 text-tertiary transition-transform", isExpanded && "rotate-90")}
-              />
-            </button>
+            {hasSubPages ? (
+              <button
+                type="button"
+                onClick={handleToggleExpand}
+                className="grid size-4 flex-shrink-0 place-items-center rounded hover:bg-layer-transparent-hover"
+                aria-label={isExpanded ? "Collapse sub-pages" : "Expand sub-pages"}
+              >
+                <ChevronRightIcon
+                  className={cn("size-3 text-tertiary transition-transform", isExpanded && "rotate-90")}
+                />
+              </button>
+            ) : (
+              <span className="size-4 flex-shrink-0" />
+            )}
             <span className="grid size-4 flex-shrink-0 place-items-center">
               {page.logo_props?.in_use ? (
                 <Logo logo={page.logo_props} size={13} type="lucide" />
