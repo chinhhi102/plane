@@ -46,6 +46,7 @@ export interface IProjectPageStore {
   getCurrentProjectPageIdsByTab: (pageType: TPageNavigationTabs) => string[] | undefined;
   getCurrentProjectPageIds: (projectId: string) => string[];
   getCurrentProjectFilteredPageIdsByTab: (pageType: TPageNavigationTabs) => string[] | undefined;
+  getChildPageIds: (pageId: string) => string[];
   getPageById: (pageId: string) => TProjectPage | undefined;
   updateFilters: <T extends keyof TPageFilters>(filterKey: T, filterValue: TPageFilters[T]) => void;
   clearAllFilters: () => void;
@@ -61,6 +62,7 @@ export interface IProjectPageStore {
     pageId: string,
     options?: { trackVisit?: boolean }
   ) => Promise<TPage | undefined>;
+  fetchSubPages: (workspaceSlug: string, projectId: string, pageId: string) => Promise<TPage[] | undefined>;
   createPage: (pageData: Partial<TPage>) => Promise<TPage | undefined>;
   removePage: (params: { pageId: string; shouldSync?: boolean }) => Promise<void>;
   movePage: (workspaceSlug: string, projectId: string, pageId: string, newProjectId: string) => Promise<void>;
@@ -96,6 +98,7 @@ export class ProjectPageStore implements IProjectPageStore {
       // actions
       fetchPagesList: action,
       fetchPageDetails: action,
+      fetchSubPages: action,
       createPage: action,
       removePage: action,
       movePage: action,
@@ -142,7 +145,8 @@ export class ProjectPageStore implements IProjectPageStore {
     if (!projectId) return undefined;
     // helps to filter pages based on the pageType
     let pagesByType = filterPagesByPageType(pageType, Object.values(this?.data || {}));
-    pagesByType = pagesByType.filter((p) => p.project_ids?.includes(projectId));
+    // only root pages are shown in the list; child pages are reachable from their parent
+    pagesByType = pagesByType.filter((p) => p.project_ids?.includes(projectId) && !p.parent);
 
     const pages = (pagesByType.map((page) => page.id) as string[]) || undefined;
 
@@ -172,6 +176,7 @@ export class ProjectPageStore implements IProjectPageStore {
     let filteredPages = pagesByType.filter(
       (p) =>
         p.project_ids?.includes(projectId) &&
+        !p.parent &&
         getPageName(p.name).toLowerCase().includes(this.filters.searchQuery.toLowerCase()) &&
         shouldFilterPage(p, this.filters.filters)
     );
@@ -180,6 +185,18 @@ export class ProjectPageStore implements IProjectPageStore {
     const pages = (filteredPages.map((page) => page.id) as string[]) || undefined;
 
     return pages ?? undefined;
+  });
+
+  /**
+   * @description get the child page ids of a page, ordered by sort_order
+   * @param {string} pageId
+   */
+  getChildPageIds = computedFn((pageId: string) => {
+    const children = Object.values(this?.data || {}).filter(
+      (page) => page.parent === pageId && !page.deleted_at && !page.archived_at
+    );
+    children.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    return children.map((page) => page.id) as string[];
   });
 
   /**
@@ -284,6 +301,41 @@ export class ProjectPageStore implements IProjectPageStore {
         this.error = {
           title: "Failed",
           description: "Failed to fetch the page, Please try again later.",
+        };
+      });
+      throw error;
+    }
+  };
+
+  /**
+   * @description fetch the sub-pages of a page
+   * @param {string} pageId
+   */
+  fetchSubPages = async (workspaceSlug: string, projectId: string, pageId: string) => {
+    try {
+      if (!workspaceSlug || !projectId || !pageId) return undefined;
+
+      const pages = await this.service.fetchSubPages(workspaceSlug, projectId, pageId);
+      runInAction(() => {
+        for (const page of pages) {
+          if (page?.id) {
+            const existingPage = this.getPageById(page.id);
+            if (existingPage) {
+              const { name: _name, ...otherFields } = page;
+              existingPage.mutateProperties(otherFields, false);
+            } else {
+              set(this.data, [page.id], new ProjectPage(this.store, page));
+            }
+          }
+        }
+      });
+
+      return pages;
+    } catch (error) {
+      runInAction(() => {
+        this.error = {
+          title: "Failed",
+          description: "Failed to fetch the sub-pages, Please try again later.",
         };
       });
       throw error;

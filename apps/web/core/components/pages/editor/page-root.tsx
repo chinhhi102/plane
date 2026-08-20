@@ -23,6 +23,7 @@ import { PagesVersionEditor } from "../version/editor";
 import { ContentLimitBanner } from "./content-limit-banner";
 import { PageEditorBody } from "./editor-body";
 import type { TEditorBodyConfig, TEditorBodyHandlers } from "./editor-body";
+import { PageSubPagesSection } from "./sub-pages-section";
 import { PageEditorToolbarRoot } from "./toolbar";
 
 export type TPageRootHandlers = {
@@ -167,6 +168,7 @@ export const PageRoot = observer(function PageRoot(props: TPageRootProps) {
           page={page}
         />
         {showContentTooLargeBanner && <ContentLimitBanner className="px-page-x" />}
+        <PageSubPagesSection page={page} storeType={storeType} workspaceSlug={workspaceSlug} projectId={projectId} />
         <PageEditorBody
           config={config}
           customRealtimeEventHandlers={mergedCustomEventHandlers}

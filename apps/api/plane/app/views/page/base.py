@@ -94,7 +94,6 @@ class PageViewSet(BaseViewSet):
                 projects__project_projectmember__is_active=True,
                 projects__archived_at__isnull=True,
             )
-            .filter(parent__isnull=True)
             .filter(Q(owned_by=self.request.user) | Q(access=0))
             .prefetch_related("projects")
             .select_related("workspace")
@@ -289,7 +288,25 @@ class PageViewSet(BaseViewSet):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def list(self, request, slug, project_id):
-        queryset = self.get_queryset()
+        # only root pages are listed; children are fetched via sub_pages
+        queryset = self.get_queryset().filter(parent__isnull=True)
+        project = Project.objects.get(pk=project_id)
+        if (
+            ProjectMember.objects.filter(
+                workspace__slug=slug,
+                project_id=project_id,
+                member=request.user,
+                role=5,
+                is_active=True,
+            ).exists()
+            and not project.guest_view_all_features
+        ):
+            queryset = queryset.filter(owned_by=request.user)
+        pages = PageSerializer(queryset, many=True).data
+        return Response(pages, status=status.HTTP_200_OK)
+
+    def sub_pages(self, request, slug, project_id, page_id):
+        queryset = self.get_queryset().filter(parent_id=page_id).order_by("sort_order", "-created_at")
         project = Project.objects.get(pk=project_id)
         if (
             ProjectMember.objects.filter(
